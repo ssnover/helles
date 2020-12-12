@@ -4,18 +4,19 @@ use std::io::prelude::*;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-//type Handler = Box<dyn FnOnce(String) + Send + 'static>;
-
 pub struct Server {
     socket: UnixListenerWrapper,
+    channel_tx: Sender<String>,
 }
 
 impl Server {
-    pub fn new(path: impl AsRef<Path>) -> std::io::Result<Self> {
+    pub fn new(path: impl AsRef<Path>) -> std::io::Result<(Self, Receiver<String>)> {
+        let (tx, rx) = channel();
         let wrapper = match UnixListenerWrapper::bind(path) {
             Ok(sock) => sock,
             Err(err) => {
@@ -24,7 +25,13 @@ impl Server {
             }
         };
 
-        Ok(Server { socket: wrapper })
+        Ok(
+            (Server {
+                socket: wrapper,
+                channel_tx: tx,
+            },
+            rx),
+        )
     }
 
     pub fn run(&self, keep_running: Arc<AtomicBool>) {
@@ -39,7 +46,7 @@ impl Server {
                     match self.handle_client(stream, &mut buffer) {
                         Ok(()) => (),
                         Err(err) => {
-                            eprintln!("json-cmd-srv: Failure to handle client: {}", err);
+                            eprintln!("json-cmd-srv: Failure to handle client: {:?}", err);
                         }
                     };
                 }
@@ -64,13 +71,24 @@ impl Server {
     fn handle_client(&self, mut stream: UnixStream, buffer: &mut [u8]) -> std::io::Result<()> {
         stream.set_nonblocking(false)?;
         stream.set_read_timeout(Some(Duration::from_millis(100)))?;
+        let now = std::time::Instant::now();
 
         let mut left_braces = 0 as u32;
         let mut right_braces = 0 as u32;
 
         let mut byte_counter = 0 as usize;
-        // Should probably check this error, since timeout is intended to be valid error case to handle
-        while let bytes_read = stream.read(buffer)? {
+        loop {
+            let bytes_read = match stream.read(buffer) {
+                Ok(rx) => rx,
+                Err(err) if err.kind() == std::io::ErrorKind::TimedOut => {
+                    if now.elapsed() > Duration::from_millis(500) {
+                        dbg!("Time out");
+                        return Err(err);
+                    }
+                    continue;
+                },
+                Err(err) => { return Err(err); },
+            };
             let total_bytes = byte_counter + bytes_read;
             if total_bytes > buffer.len() {
                 eprintln!(
@@ -98,7 +116,7 @@ impl Server {
             }
 
             if let Some(idx) = end_brace_idx {
-                self.handle_command(String::from_utf8_lossy(&buffer[..idx]).to_string());
+                self.handle_command(String::from_utf8_lossy(&buffer[..idx+1]).to_string());
                 break;
             } else {
                 byte_counter += bytes_read;
@@ -108,7 +126,10 @@ impl Server {
     }
 
     fn handle_command(&self, cmd: String) {
-        println!("json-cmd-srv: Got a command: {}", cmd);
+        match self.channel_tx.send(cmd) {
+            Ok(_) => {}
+            Err(err) => eprintln!("json-cmd-srv: Error sending command: {}", err),
+        }
     }
 }
 
