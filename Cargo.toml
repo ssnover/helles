@@ -7,13 +7,13 @@ edition = "2018"
 [lib]
 path = "src/lib.rs"
 
-[[bin]]
-path = "src/main.rs"
+[[example]]
+path = "examples/test-server.rs"
 name = "test-server"
 
-[[bin]]
-path = "src/test-client.rs"
+[[example]]
+path = "examples/test-client.rs"
 name = "test-client"
 
-[dependencies]
+[dev-dependencies]
 ctrlc = "3.1"

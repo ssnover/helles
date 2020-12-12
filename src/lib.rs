@@ -1,5 +1,3 @@
-#![allow(irrefutable_let_patterns)]
-
 use std::io::prelude::*;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -25,13 +23,13 @@ impl Server {
             }
         };
 
-        Ok(
-            (Server {
+        Ok((
+            Server {
                 socket: wrapper,
                 channel_tx: tx,
             },
-            rx),
-        )
+            rx,
+        ))
     }
 
     pub fn run(&self, keep_running: Arc<AtomicBool>) {
@@ -80,14 +78,16 @@ impl Server {
         loop {
             let bytes_read = match stream.read(buffer) {
                 Ok(rx) => rx,
-                Err(err) if err.kind() == std::io::ErrorKind::TimedOut => {
+                // TODO: Figure out why this returns WouldBlock after timeout instead of TimedOut...
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                     if now.elapsed() > Duration::from_millis(500) {
-                        dbg!("Time out");
                         return Err(err);
                     }
                     continue;
-                },
-                Err(err) => { return Err(err); },
+                }
+                Err(err) => {
+                    return Err(err);
+                }
             };
             let total_bytes = byte_counter + bytes_read;
             if total_bytes > buffer.len() {
@@ -109,6 +109,7 @@ impl Server {
                         right_braces += 1;
                         if left_braces == right_braces {
                             end_brace_idx = Some(idx);
+                            break;
                         }
                     }
                     _ => {}
@@ -116,7 +117,7 @@ impl Server {
             }
 
             if let Some(idx) = end_brace_idx {
-                self.handle_command(String::from_utf8_lossy(&buffer[..idx+1]).to_string());
+                self.handle_command(String::from_utf8_lossy(&buffer[..idx + 1]).to_string());
                 break;
             } else {
                 byte_counter += bytes_read;

@@ -20,12 +20,12 @@ fn main() -> std::io::Result<()> {
         std::thread::sleep(Duration::from_secs(1));
         match rx.try_recv() {
             Ok(cmd) => println!("Server got command: {}", cmd),
-            Err(err) => {
-                match err {
-                    TryRecvError::Disconnected => { running.store(false, Ordering::SeqCst); },
-                    _ => {},
+            Err(err) => match err {
+                TryRecvError::Disconnected => {
+                    running.store(false, Ordering::SeqCst);
                 }
-            }
+                _ => {}
+            },
         }
     }
 
