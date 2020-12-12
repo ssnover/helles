@@ -1,3 +1,11 @@
+// Copyright (c) 2020 Shane Snover <ssnover95@gmail.com>
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
 use std::io::prelude::*;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -6,6 +14,29 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
+
+pub struct CommandClient {
+    socket_path: PathBuf,
+}
+
+impl CommandClient {
+    pub fn new(path: impl AsRef<Path>) -> Self {
+        CommandClient {
+            socket_path: path.as_ref().to_owned(),
+        }
+    }
+}
+
+impl Write for CommandClient {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut stream = UnixStream::connect(&self.socket_path)?;
+        stream.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 
 pub struct Server {
     socket: UnixListenerWrapper,
@@ -44,7 +75,7 @@ impl Server {
                     match self.handle_client(stream, &mut buffer) {
                         Ok(()) => (),
                         Err(err) => {
-                            eprintln!("json-cmd-srv: Failure to handle client: {:?}", err);
+                            eprintln!("json-cmd-srv: Failure to handle client: {}", err);
                         }
                     };
                 }
@@ -68,27 +99,14 @@ impl Server {
 
     fn handle_client(&self, mut stream: UnixStream, buffer: &mut [u8]) -> std::io::Result<()> {
         stream.set_nonblocking(false)?;
-        stream.set_read_timeout(Some(Duration::from_millis(100)))?;
-        let now = std::time::Instant::now();
+        stream.set_read_timeout(Some(Duration::from_millis(500)))?;
 
         let mut left_braces = 0 as u32;
         let mut right_braces = 0 as u32;
 
         let mut byte_counter = 0 as usize;
         loop {
-            let bytes_read = match stream.read(buffer) {
-                Ok(rx) => rx,
-                // TODO: Figure out why this returns WouldBlock after timeout instead of TimedOut...
-                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                    if now.elapsed() > Duration::from_millis(500) {
-                        return Err(err);
-                    }
-                    continue;
-                }
-                Err(err) => {
-                    return Err(err);
-                }
-            };
+            let bytes_read = stream.read(buffer)?;
             let total_bytes = byte_counter + bytes_read;
             if total_bytes > buffer.len() {
                 eprintln!(

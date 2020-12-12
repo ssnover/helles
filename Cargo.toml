@@ -1,8 +1,15 @@
 [package]
-name = "json-command-server"
+name = "helles"
 version = "0.1.0"
 authors = ["Shane Snover <ssnover95@gmail.com>"]
+license = "MIT/Apache-2.0"
+repository = "https://github.com/ssnover/helles"
+description = """
+A Unix socket-based server for receiving json-format messages, intended for daemon processes.
+"""
 edition = "2018"
+readme = "README.md"
+keywords = ["daemon"]
 
 [lib]
 path = "src/lib.rs"
